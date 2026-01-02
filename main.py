@@ -114,6 +114,160 @@ def cli():
     pass
 
 @cli.command()
+
+@click.argument("package")
+
+def info(package):
+
+    """Show details about a package."""
+
+    try:
+
+        project = ModrinthAPI.get_project(package)
+
+        if not project:
+
+            console.print(f"[red]E: Unable to locate package {package}[/red]")
+
+            return
+
+
+
+        # Fetch latest version for some extra stats (like size) if needed, 
+
+        # but project info has most metadata.
+
+        
+
+        console.print(f"[bold white]Package:[/bold white] {project['slug']}")
+
+        console.print(f"[bold white]ID:[/bold white] {project['id']}")
+
+        console.print(f"[bold white]Author:[/bold white] {ModrinthAPI.get_project(project['team']) if 'team' not in project else 'Unknown'}") # Team lookup is separate usually, strict project object has 'team' ID. 
+
+        # Actually project object has 'client_side', 'server_side', etc.
+
+        # 'team' is an ID. We might skip resolving team name to save an API call or just show ID.
+
+        # Let's use the 'author' field from search results if we cached it, but here we only have project response.
+
+        # Project response doesn't have author name directly, it refers to a team. 
+
+        # However, the search result had it. For 'info', let's just skip author name resolution to keep it fast, or show the team ID.
+
+        
+
+        console.print(f"[bold white]Description:[/bold white] {project['description']}")
+
+        console.print(f"[bold white]License:[/bold white] {project['license']['name'] if project.get('license') else 'Unknown'}")
+
+        console.print(f"[bold white]Categories:[/bold white] {', '.join(project['categories'])}")
+
+        console.print(f"[bold white]Downloads:[/bold white] {project['downloads']}")
+
+        console.print(f"[bold white]Website:[/bold white] {project.get('wiki_url') or project.get('source_url') or project.get('discord_url') or 'N/A'}")
+
+        
+
+    except Exception as e:
+
+        console.print(f"[red]E: Failed to fetch info: {e}[/red]")
+
+
+
+@cli.command("list")
+
+@click.option("--installed", is_flag=True, default=True, help="List installed packages (default).")
+
+def list_packages(installed):
+
+    """List installed packages."""
+
+    # Currently only supports installed
+
+    
+
+    pm = PackageManager()
+
+    installed_plugins = pm.get_installed_plugins()
+
+    
+
+    if not installed_plugins:
+
+        console.print("No plugins installed.")
+
+        return
+
+
+
+    console.print("Listing... [green]Done[/green]")
+
+    
+
+    hashes = list(installed_plugins.values())
+    try:
+        versions_map = ModrinthAPI.get_versions_by_hashes(hashes)
+    except Exception as e:
+        console.print(f"[red]E: Failed to resolve versions: {e}[/red]")
+        return
+        
+    sha1_to_filename = {v: k for k, v in installed_plugins.items()}
+    
+    table = Table(box=None, show_header=False, padding=(0, 2))
+    table.add_column("Package", style="green")
+    table.add_column("Version")
+    table.add_column("Status")
+
+    
+
+    for file_sha1, filename in sha1_to_filename.items():
+
+        # Modrinth returns keyed by hash
+
+        version_info = versions_map.get(file_sha1)
+
+        
+
+        if version_info:
+
+            # We need project slug. Version object has project_id.
+
+            # Ideally we resolve project_id -> slug.
+
+            # But that is N requests.
+
+            # For 'apt list', we accept just the filename or project_id if needed.
+
+            # But wait, Modrinth version object might not have project slug.
+
+            # It has 'project_id'.
+
+            # To be fast, we might display project_id or just filename.
+
+            # Let's verify what version object has.
+
+            pkg_name = version_info['project_id'] # Fallback
+
+            ver_num = version_info['version_number']
+
+        else:
+
+            pkg_name = filename
+
+            ver_num = "unknown"
+
+
+
+        table.add_row(f"{pkg_name}", ver_num, "[installed]")
+
+
+
+    console.print(table)
+
+
+
+@cli.command()
 def update():
     """Update list of available packages."""
     for i, loader in enumerate(["spigot", "paper", "purpur"], 1):
