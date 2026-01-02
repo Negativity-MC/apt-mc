@@ -60,6 +60,15 @@ class ModrinthAPI:
         res.raise_for_status()
         return res.json()
 
+    @staticmethod
+    def get_members(project_id_or_slug: str) -> List[Dict[str, Any]]:
+        res = requests.get(
+            f"{ModrinthAPI.BASE_URL}/project/{project_id_or_slug}/members",
+            headers=ModrinthAPI.HEADERS
+        )
+        res.raise_for_status()
+        return res.json()
+
 class PackageManager:
     def __init__(self, plugins_dir: str = "plugins"):
         self.plugins_dir = plugins_dir
@@ -133,29 +142,115 @@ def info(package):
 
 
 
-        # Fetch latest version for some extra stats (like size) if needed, 
+        # Check installation status
 
-        # but project info has most metadata.
+        pm = PackageManager()
+
+        installed_hashes = list(pm.get_installed_plugins().values())
+
+        status = "[red]Not Installed[/red]"
 
         
+
+        if installed_hashes:
+
+            try:
+
+                # This might be heavy if many plugins, but accurate
+
+                installed_versions = ModrinthAPI.get_versions_by_hashes(installed_hashes)
+
+                for v in installed_versions.values():
+
+                    if v['project_id'] == project['id']:
+
+                        status = "[green]Installed[/green]"
+
+                        break
+
+            except:
+
+                pass
+
+
+
+        # Get Dependencies from latest version
+
+        dependencies = "None"
+
+        try:
+
+            versions = ModrinthAPI.get_versions(project['id'], ["spigot", "paper", "purpur", "bukkit"])
+
+            if versions:
+
+                latest = versions[0]
+
+                deps = latest.get("dependencies", [])
+
+                req_deps = [d['project_id'] for d in deps if d.get("dependency_type") == "required" and d.get("project_id")]
+
+                
+
+                if req_deps:
+
+                    dep_names = []
+
+                    for dep_id in req_deps:
+
+                        # Best effort name resolution
+
+                        try:
+
+                            dep_proj = ModrinthAPI.get_project(dep_id)
+
+                            if dep_proj:
+
+                                dep_names.append(dep_proj['slug'])
+
+                            else:
+
+                                dep_names.append(dep_id)
+
+                        except:
+
+                            dep_names.append(dep_id)
+
+                    dependencies = ", ".join(dep_names)
+
+        except:
+
+            pass
+
+        
+
+        author = "Unknown"
+
+        try:
+
+            members = ModrinthAPI.get_members(project['slug'])
+
+            # Find owner or first member
+
+            owner = next((m for m in members if m.get("role") == "Owner"), members[0] if members else None)
+
+            if owner:
+
+                author = owner.get("user", {}).get("username", "Unknown")
+
+        except:
+
+            pass
+
+            
 
         console.print(f"[bold white]Package:[/bold white] {project['slug']}")
 
         console.print(f"[bold white]ID:[/bold white] {project['id']}")
 
-        console.print(f"[bold white]Author:[/bold white] {ModrinthAPI.get_project(project['team']) if 'team' not in project else 'Unknown'}") # Team lookup is separate usually, strict project object has 'team' ID. 
+        console.print(f"[bold white]Status:[/bold white] {status}")
 
-        # Actually project object has 'client_side', 'server_side', etc.
-
-        # 'team' is an ID. We might skip resolving team name to save an API call or just show ID.
-
-        # Let's use the 'author' field from search results if we cached it, but here we only have project response.
-
-        # Project response doesn't have author name directly, it refers to a team. 
-
-        # However, the search result had it. For 'info', let's just skip author name resolution to keep it fast, or show the team ID.
-
-        
+        console.print(f"[bold white]Author:[/bold white] {author}")
 
         console.print(f"[bold white]Description:[/bold white] {project['description']}")
 
@@ -165,6 +260,8 @@ def info(package):
 
         console.print(f"[bold white]Downloads:[/bold white] {project['downloads']}")
 
+        console.print(f"[bold white]Dependencies:[/bold white] {dependencies}")
+
         console.print(f"[bold white]Website:[/bold white] {project.get('wiki_url') or project.get('source_url') or project.get('discord_url') or 'N/A'}")
 
         
@@ -172,6 +269,12 @@ def info(package):
     except Exception as e:
 
         console.print(f"[red]E: Failed to fetch info: {e}[/red]")
+
+
+
+    
+
+
 
 
 
