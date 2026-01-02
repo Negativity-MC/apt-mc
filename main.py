@@ -4,6 +4,7 @@ import requests
 import os
 import time
 import json
+import hashlib
 from typing import List, Optional, Dict, Any
 from rich.console import Console
 from rich.table import Table
@@ -47,6 +48,18 @@ class ModrinthAPI:
         res.raise_for_status()
         return res.json()
 
+    @staticmethod
+    def get_versions_by_hashes(hashes: List[str]) -> Dict[str, Any]:
+        if not hashes:
+            return {}
+        res = requests.post(
+            f"{ModrinthAPI.BASE_URL}/version_files",
+            json={"hashes": hashes, "algorithm": "sha1"},
+            headers=ModrinthAPI.HEADERS
+        )
+        res.raise_for_status()
+        return res.json()
+
 class PackageManager:
     def __init__(self, plugins_dir: str = "plugins"):
         self.plugins_dir = plugins_dir
@@ -72,6 +85,28 @@ class PackageManager:
                     for chunk in r.iter_content(chunk_size=8192):
                         f.write(chunk)
                         progress.update(task, advance=len(chunk))
+
+    def calculate_sha1(self, filepath: str) -> str:
+        sha1 = hashlib.sha1()
+        with open(filepath, 'rb') as f:
+            while True:
+                data = f.read(65536)
+                if not data:
+                    break
+                sha1.update(data)
+        return sha1.hexdigest()
+
+    def get_installed_plugins(self) -> Dict[str, str]:
+        """Returns a dict of filename -> sha1"""
+        if not os.path.exists(self.plugins_dir):
+            return {}
+        
+        plugins = {}
+        for f in os.listdir(self.plugins_dir):
+            if f.endswith(".jar"):
+                full_path = os.path.join(self.plugins_dir, f)
+                plugins[f] = self.calculate_sha1(full_path)
+        return plugins
 
 @click.group()
 def cli():
@@ -162,6 +197,102 @@ def install(packages):
             pm.download_file(primary_file["url"], primary_file["filename"], primary_file["size"])
         except Exception as e:
             console.print(f"[red]E: Failed to install {pkg['slug']}: {e}[/red]")
+
+@cli.command()
+def upgrade():
+    """Upgrade installed plugins."""
+    console.print("Reading package lists... [green]Done[/green]")
+    console.print("Building dependency tree... [green]Done[/green]")
+    console.print("Reading state information... [green]Done[/green]")
+    console.print("Calculating upgrades... ", end="")
+
+    pm = PackageManager()
+    installed = pm.get_installed_plugins()
+    
+    if not installed:
+        console.print("[green]Done[/green]")
+        console.print("0 upgraded, 0 newly installed, 0 to remove and 0 not upgraded.")
+        return
+
+    # Bulk lookup hashes
+    hashes = list(installed.values())
+    try:
+        versions_map = ModrinthAPI.get_versions_by_hashes(hashes)
+    except Exception as e:
+        console.print(f"[red]E: Failed to check for updates: {e}[/red]")
+        return
+
+    updates = []
+    
+    # Map sha1 -> filename
+    sha1_to_filename = {v: k for k, v in installed.items()}
+
+    for file_sha1, version_info in versions_map.items():
+        if not version_info:
+            continue
+            
+        project_id = version_info['project_id']
+        current_version_id = version_info['id']
+        
+        # Check for latest version of this project
+        try:
+            # We assume users want spigot/paper plugins
+            available_versions = ModrinthAPI.get_versions(project_id, ["spigot", "paper", "purpur", "bukkit"])
+            if not available_versions:
+                continue
+                
+            latest = available_versions[0]
+            
+            if latest['id'] != current_version_id:
+                filename = sha1_to_filename.get(file_sha1, "Unknown")
+                updates.append({
+                    "filename": filename,
+                    "project_id": project_id,
+                    "current_version": version_info['version_number'],
+                    "new_version": latest['version_number'],
+                    "latest_obj": latest
+                })
+        except Exception:
+            continue
+
+    console.print("[green]Done[/green]")
+
+    if not updates:
+        console.print("0 upgraded, 0 newly installed, 0 to remove and 0 not upgraded.")
+        return
+
+    console.print(f"\nThe following packages will be upgraded:")
+    for up in updates:
+        console.print(f"  {up['filename']} ({up['current_version']} -> {up['new_version']})")
+
+    console.print(f"\n{len(updates)} upgraded, 0 newly installed, 0 to remove and 0 not upgraded.")
+    
+    # In a real apt parody, we might prompt. For now, let's just do it or require -y. 
+    # But for a tool, auto-upgrading on 'upgrade' command is standard behavior for 'apt-get upgrade' (with -y) or prompted.
+    # We will simulate the prompt.
+    
+    if not click.confirm("Do you want to continue?", default=True):
+        console.print("Abort.")
+        return
+
+    for up in updates:
+        latest = up['latest_obj']
+        files = latest.get("files", [])
+        if not files:
+            continue
+            
+        primary_file = next((f for f in files if f.get("primary")), files[0])
+        
+        # Remove old file
+        old_path = os.path.join(pm.plugins_dir, up['filename'])
+        if os.path.exists(old_path):
+            os.remove(old_path)
+            
+        # Download new
+        try:
+            pm.download_file(primary_file["url"], primary_file["filename"], primary_file["size"])
+        except Exception as e:
+             console.print(f"[red]E: Failed to upgrade {up['filename']}: {e}[/red]")
 
 @cli.command()
 @click.argument("package")
