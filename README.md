@@ -1,6 +1,6 @@
 # apt-mc
 
-The Advanced Packaging Tool for Minecraft. A CLI plugin manager for Spigot, Paper, Purpur, and Bukkit servers, powered by the Modrinth API.
+The Missing Package Manager for Minecraft Servers. 🍺
 
 ## Features
 - **Parody Interface**: Mimics the familiar Debian/Ubuntu `apt` commands.
