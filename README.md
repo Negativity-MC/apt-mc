@@ -7,6 +7,10 @@ The Missing Package Manager for Minecraft Servers. 🍺
 - **Modrinth Integration**: Searches and downloads plugins directly from Modrinth.
 - **Smart Filtering**: Automatically filters for Spigot/Paper compatible plugins (ignoring mods).
 - **Colorful Output**: Uses `rich` for a modern CLI experience.
+- **TUI**: When ran without command line arguments, `textual` gets used to open a modern TUI to manage your plugins
+
+## Warning
+> If you build a proprietary SaaS (Software as a Service) on top of this, you are now PART of the problem. Don't be that person.
 
 ## Installation
 
